@@ -7,6 +7,7 @@
   Eye,
   ListChecks,
   Pause,
+  Pencil,
   Play,
   Plus,
   RefreshCw,
@@ -15,6 +16,7 @@
   Square,
   Trash2,
   User,
+  X,
 } from "lucide-react";
 import {
   getUser,
@@ -41,12 +43,15 @@ import {
 } from "./storage";
 import type { DayKey, PlannerTab, TaskStatus, WeekPlan, WorkSection, WorkTask, WorkView } from "./types";
 
-interface TaskDraft {
+interface TaskEditorState {
+  taskId: string | null; // null = creating a new task
   title: string;
   sectionId: string;
   estimateHours: string;
   day: DayKey | "backlog";
   planned: boolean;
+  status: TaskStatus;
+  notes: string;
 }
 
 interface SummaryMetric {
@@ -95,29 +100,33 @@ function getSection(sectionId: string, sections: WorkSection[]) {
   return sections.find((section) => section.id === sectionId) ?? sections[0];
 }
 
-function createEmptyDraft(sectionId: string, day: DayKey | "backlog", planned = true): TaskDraft {
+function createTaskEditorState(
+  sectionId: string,
+  day: DayKey | "backlog",
+  planned = true,
+): TaskEditorState {
   return {
+    taskId: null,
     title: "",
     sectionId,
     estimateHours: "1",
     day,
     planned,
+    status: "planned",
+    notes: "",
   };
 }
 
-function buildTask(draft: TaskDraft): WorkTask {
+function editorStateFromTask(task: WorkTask): TaskEditorState {
   return {
-    id: createId("task"),
-    title: draft.title.trim(),
-    sectionId: draft.sectionId,
-    day: draft.day,
-    estimateHours: Number(draft.estimateHours) || 0,
-    planned: draft.planned,
-    status: "planned",
-    actualSeconds: 0,
-    timerStartedAt: null,
-    notes: "",
-    createdAt: new Date().toISOString(),
+    taskId: task.id,
+    title: task.title,
+    sectionId: task.sectionId,
+    estimateHours: String(task.estimateHours),
+    day: task.day,
+    planned: task.planned,
+    status: task.status,
+    notes: task.notes,
   };
 }
 
@@ -216,12 +225,7 @@ function PlannerApp({ user, signOut }: { user: NetlifyUser; signOut: () => Promi
   const [view, setView] = useState<WorkView>("planner");
   const [tab, setTab] = useState<PlannerTab>("daily");
   const [selectedDay, setSelectedDay] = useState<DayKey>(() => getTodayKey());
-  const [weeklyDraft, setWeeklyDraft] = useState<TaskDraft>(() =>
-    createEmptyDraft(plan.sections[0]?.id ?? "", "backlog"),
-  );
-  const [dailyDraft, setDailyDraft] = useState<TaskDraft>(() =>
-    createEmptyDraft(plan.sections[0]?.id ?? "", getTodayKey(), false),
-  );
+  const [taskEditor, setTaskEditor] = useState<TaskEditorState | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [newSectionName, setNewSectionName] = useState("");
 
@@ -229,15 +233,6 @@ function PlannerApp({ user, signOut }: { user: NetlifyUser; signOut: () => Promi
     const interval = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(interval);
   }, []);
-
-  useEffect(() => {
-    setWeeklyDraft((draft) =>
-      draft.sectionId ? draft : { ...draft, sectionId: plan.sections[0]?.id ?? "" },
-    );
-    setDailyDraft((draft) =>
-      draft.sectionId ? draft : { ...draft, sectionId: plan.sections[0]?.id ?? "" },
-    );
-  }, [plan.sections]);
 
   const summary = useMemo(() => {
     const plannedTasks = plan.tasks.filter((task) => task.planned);
@@ -307,14 +302,56 @@ function PlannerApp({ user, signOut }: { user: NetlifyUser; signOut: () => Promi
     }));
   }
 
-  function addTask(draft: TaskDraft, reset: (draft: TaskDraft) => void) {
-    if (!draft.title.trim()) return;
-    const task = buildTask(draft);
-    setPlan((current) => ({
-      ...current,
-      tasks: [...current.tasks, task],
-    }));
-    reset(createEmptyDraft(draft.sectionId, draft.day, draft.planned));
+  function openCreateTask(day: DayKey | "backlog", planned: boolean) {
+    setTaskEditor(createTaskEditorState(plan.sections[0]?.id ?? "", day, planned));
+  }
+
+  function openEditTask(task: WorkTask) {
+    setTaskEditor(editorStateFromTask(task));
+  }
+
+  function saveTaskEditor(state: TaskEditorState) {
+    const title = state.title.trim();
+    if (!title) return;
+    const estimateHours = Number(state.estimateHours) || 0;
+
+    if (state.taskId) {
+      updateTask(state.taskId, (task) => ({
+        ...task,
+        title,
+        sectionId: state.sectionId,
+        day: state.day,
+        estimateHours,
+        planned: state.planned,
+        status: state.status,
+        notes: state.notes,
+      }));
+    } else {
+      const task: WorkTask = {
+        id: createId("task"),
+        title,
+        sectionId: state.sectionId || plan.sections[0]?.id || "",
+        day: state.day,
+        estimateHours,
+        planned: state.planned,
+        status: state.status,
+        actualSeconds: 0,
+        timerStartedAt: null,
+        notes: state.notes,
+        createdAt: new Date().toISOString(),
+      };
+      setPlan((current) => ({
+        ...current,
+        tasks: [...current.tasks, task],
+      }));
+    }
+
+    setTaskEditor(null);
+  }
+
+  function deleteFromEditor(taskId: string) {
+    deleteTask(taskId);
+    setTaskEditor(null);
   }
 
   function startTimer(taskId: string) {
@@ -555,9 +592,8 @@ function PlannerApp({ user, signOut }: { user: NetlifyUser; signOut: () => Promi
                 plan={plan}
                 selectedDay={selectedDay}
                 setSelectedDay={setSelectedDay}
-                draft={dailyDraft}
-                setDraft={setDailyDraft}
-                addTask={() => addTask(dailyDraft, setDailyDraft)}
+                onNewTask={() => openCreateTask(selectedDay, false)}
+                onEditTask={openEditTask}
                 startTimer={startTimer}
                 stopTimer={stopTimer}
                 setTaskStatus={setTaskStatus}
@@ -570,9 +606,8 @@ function PlannerApp({ user, signOut }: { user: NetlifyUser; signOut: () => Promi
             {tab === "weekly" && (
               <WeeklyView
                 plan={plan}
-                draft={weeklyDraft}
-                setDraft={setWeeklyDraft}
-                addTask={() => addTask(weeklyDraft, setWeeklyDraft)}
+                onNewTask={() => openCreateTask("backlog", true)}
+                onEditTask={openEditTask}
                 updateSection={updateSection}
                 addSection={addSection}
                 newSectionName={newSectionName}
@@ -590,9 +625,31 @@ function PlannerApp({ user, signOut }: { user: NetlifyUser; signOut: () => Promi
           </>
         )}
       </main>
+
+      {taskEditor && (
+        <TaskEditorModal
+          state={taskEditor}
+          sections={plan.sections}
+          onChange={setTaskEditor}
+          onSave={saveTaskEditor}
+          onClose={() => setTaskEditor(null)}
+          onDelete={taskEditor.taskId ? () => deleteFromEditor(taskEditor.taskId!) : undefined}
+        />
+      )}
     </div>
   );
 }
+
+// In local `vite` dev there is no Netlify Identity endpoint, so signing in is
+// impossible. Bypass the auth gate with a stand-in user; production builds
+// (vite build) still go through the real Identity flow.
+const DEV_AUTH_BYPASS = import.meta.env.DEV;
+
+const DEV_USER = {
+  id: "local-dev-user",
+  email: "local@dev.test",
+  user_metadata: { full_name: "Local Dev" },
+} as unknown as NetlifyUser;
 
 function useAuth() {
   const [user, setUser] = useState<NetlifyUser | null>(null);
@@ -600,6 +657,12 @@ function useAuth() {
   const [authError, setAuthError] = useState("");
 
   useEffect(() => {
+    if (DEV_AUTH_BYPASS) {
+      setUser(DEV_USER);
+      setAuthReady(true);
+      return;
+    }
+
     let ignore = false;
 
     async function loadUser() {
@@ -645,6 +708,10 @@ function useAuth() {
 
   async function signOut() {
     setAuthError("");
+    if (DEV_AUTH_BYPASS) {
+      setUser(DEV_USER);
+      return;
+    }
     await logout();
     setUser(null);
   }
@@ -765,78 +832,160 @@ function SyncBadge({ syncState }: { syncState: SyncState }) {
   );
 }
 
-function TaskForm({
+function TaskEditorModal({
+  state,
   sections,
-  draft,
-  setDraft,
-  onSubmit,
-  submitLabel,
+  onChange,
+  onSave,
+  onClose,
+  onDelete,
 }: {
+  state: TaskEditorState;
   sections: WorkSection[];
-  draft: TaskDraft;
-  setDraft: (draft: TaskDraft) => void;
-  onSubmit: () => void;
-  submitLabel: string;
+  onChange: (state: TaskEditorState) => void;
+  onSave: (state: TaskEditorState) => void;
+  onClose: () => void;
+  onDelete?: () => void;
 }) {
+  const isEditing = state.taskId !== null;
+
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   function submit(event: FormEvent) {
     event.preventDefault();
-    onSubmit();
+    onSave(state);
   }
 
   return (
-    <form className="task-form" onSubmit={submit}>
-      <input
-        value={draft.title}
-        onChange={(event) => setDraft({ ...draft, title: event.target.value })}
-        placeholder="Task or outcome"
-        aria-label="Task or outcome"
-      />
-      <select
-        value={draft.sectionId}
-        onChange={(event) => setDraft({ ...draft, sectionId: event.target.value })}
-        aria-label="Section"
+    <div className="modal-overlay" role="presentation" onMouseDown={onClose}>
+      <form
+        className="modal-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-label={isEditing ? "Edit task" : "New task"}
+        onSubmit={submit}
+        onMouseDown={(event) => event.stopPropagation()}
       >
-        {sections.map((section) => (
-          <option key={section.id} value={section.id}>
-            {section.name}
-          </option>
-        ))}
-      </select>
-      <select
-        value={draft.day}
-        onChange={(event) =>
-          setDraft({ ...draft, day: event.target.value as DayKey | "backlog" })
-        }
-        aria-label="Day"
-      >
-        <option value="backlog">Unscheduled</option>
-        {dayOptions.map((day) => (
-          <option key={day.key} value={day.key}>
-            {day.label}
-          </option>
-        ))}
-      </select>
-      <input
-        type="number"
-        min="0"
-        step="0.25"
-        value={draft.estimateHours}
-        onChange={(event) => setDraft({ ...draft, estimateHours: event.target.value })}
-        aria-label="Estimated hours"
-      />
-      <label className="check-label">
-        <input
-          type="checkbox"
-          checked={!draft.planned}
-          onChange={(event) => setDraft({ ...draft, planned: !event.target.checked })}
-        />
-        Unplanned
-      </label>
-      <button type="submit" className="primary-button">
-        <Plus size={16} aria-hidden="true" />
-        {submitLabel}
-      </button>
-    </form>
+        <div className="modal-head">
+          <h2>{isEditing ? "Edit task" : "New task"}</h2>
+          <button type="button" className="icon-button" title="Close" onClick={onClose}>
+            <X size={18} aria-hidden="true" />
+          </button>
+        </div>
+
+        <label>
+          <span>Task or outcome</span>
+          <input
+            autoFocus
+            value={state.title}
+            onChange={(event) => onChange({ ...state, title: event.target.value })}
+            placeholder="What needs to get done?"
+          />
+        </label>
+
+        <div className="modal-row">
+          <label>
+            <span>Section</span>
+            <select
+              value={state.sectionId}
+              onChange={(event) => onChange({ ...state, sectionId: event.target.value })}
+            >
+              {sections.map((section) => (
+                <option key={section.id} value={section.id}>
+                  {section.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Day</span>
+            <select
+              value={state.day}
+              onChange={(event) =>
+                onChange({ ...state, day: event.target.value as DayKey | "backlog" })
+              }
+            >
+              <option value="backlog">Unscheduled</option>
+              {dayOptions.map((day) => (
+                <option key={day.key} value={day.key}>
+                  {day.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <div className="modal-row">
+          <label>
+            <span>Estimated hours</span>
+            <input
+              type="number"
+              min="0"
+              step="0.25"
+              value={state.estimateHours}
+              onChange={(event) => onChange({ ...state, estimateHours: event.target.value })}
+            />
+          </label>
+          <label>
+            <span>Status</span>
+            <select
+              value={state.status}
+              onChange={(event) => onChange({ ...state, status: event.target.value as TaskStatus })}
+            >
+              {(["planned", "active", "done", "blocked"] as TaskStatus[]).map((status) => (
+                <option key={status} value={status}>
+                  {statusLabels[status]}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <label className="check-label modal-check">
+          <input
+            type="checkbox"
+            checked={!state.planned}
+            onChange={(event) => onChange({ ...state, planned: !event.target.checked })}
+          />
+          Unplanned / interruption
+        </label>
+
+        <label>
+          <span>Notes</span>
+          <textarea
+            rows={3}
+            value={state.notes}
+            onChange={(event) => onChange({ ...state, notes: event.target.value })}
+          />
+        </label>
+
+        <div className="modal-foot">
+          {onDelete ? (
+            <button type="button" className="secondary-button danger" onClick={onDelete}>
+              <Trash2 size={16} aria-hidden="true" />
+              Delete
+            </button>
+          ) : (
+            <span />
+          )}
+          <div className="modal-foot-actions">
+            <button type="button" className="secondary-button" onClick={onClose}>
+              Cancel
+            </button>
+            <button type="submit" className="primary-button" disabled={!state.title.trim()}>
+              <Save size={16} aria-hidden="true" />
+              {isEditing ? "Save changes" : "Add task"}
+            </button>
+          </div>
+        </div>
+      </form>
+    </div>
   );
 }
 
@@ -844,6 +993,7 @@ function TaskCard({
   task,
   section,
   now,
+  onEdit,
   onStart,
   onStop,
   onStatus,
@@ -853,6 +1003,7 @@ function TaskCard({
   task: WorkTask;
   section: WorkSection;
   now: number;
+  onEdit: () => void;
   onStart: () => void;
   onStop: () => void;
   onStatus: (status: TaskStatus) => void;
@@ -912,6 +1063,9 @@ function TaskCard({
             <Play size={16} aria-hidden="true" />
           </button>
         )}
+        <button className="icon-button" type="button" title="Edit task" onClick={onEdit}>
+          <Pencil size={16} aria-hidden="true" />
+        </button>
         <button
           className="icon-button"
           type="button"
@@ -932,9 +1086,8 @@ function DailyView({
   plan,
   selectedDay,
   setSelectedDay,
-  draft,
-  setDraft,
-  addTask,
+  onNewTask,
+  onEditTask,
   startTimer,
   stopTimer,
   setTaskStatus,
@@ -945,9 +1098,8 @@ function DailyView({
   plan: WeekPlan;
   selectedDay: DayKey;
   setSelectedDay: (day: DayKey) => void;
-  draft: TaskDraft;
-  setDraft: (draft: TaskDraft) => void;
-  addTask: () => void;
+  onNewTask: () => void;
+  onEditTask: (task: WorkTask) => void;
   startTimer: (taskId: string) => void;
   stopTimer: (taskId: string) => void;
   setTaskStatus: (taskId: string, status: TaskStatus) => void;
@@ -979,10 +1131,7 @@ function DailyView({
               key={day.key}
               type="button"
               className={selectedDay === day.key ? "active" : ""}
-              onClick={() => {
-                setSelectedDay(day.key);
-                setDraft({ ...draft, day: day.key });
-              }}
+              onClick={() => setSelectedDay(day.key)}
             >
               {day.short}
             </button>
@@ -990,13 +1139,12 @@ function DailyView({
         </div>
       </div>
 
-      <TaskForm
-        sections={plan.sections}
-        draft={{ ...draft, day: selectedDay, planned: false }}
-        setDraft={(next) => setDraft({ ...next, day: selectedDay, planned: false })}
-        onSubmit={addTask}
-        submitLabel="Log new work"
-      />
+      <div className="workspace-actions">
+        <button type="button" className="primary-button" onClick={onNewTask}>
+          <Plus size={16} aria-hidden="true" />
+          Log new work
+        </button>
+      </div>
 
       <div className="two-column">
         <div className="flow-column">
@@ -1011,6 +1159,7 @@ function DailyView({
                 task={task}
                 section={getSection(task.sectionId, plan.sections)}
                 now={now}
+                onEdit={() => onEditTask(task)}
                 onStart={() => startTimer(task.id)}
                 onStop={() => stopTimer(task.id)}
                 onStatus={(status) => setTaskStatus(task.id, status)}
@@ -1051,9 +1200,8 @@ function DailyView({
 
 function WeeklyView({
   plan,
-  draft,
-  setDraft,
-  addTask,
+  onNewTask,
+  onEditTask,
   updateSection,
   addSection,
   newSectionName,
@@ -1066,9 +1214,8 @@ function WeeklyView({
   now,
 }: {
   plan: WeekPlan;
-  draft: TaskDraft;
-  setDraft: (draft: TaskDraft) => void;
-  addTask: () => void;
+  onNewTask: () => void;
+  onEditTask: (task: WorkTask) => void;
   updateSection: (sectionId: string, patch: Partial<WorkSection>) => void;
   addSection: () => void;
   newSectionName: string;
@@ -1096,13 +1243,12 @@ function WeeklyView({
         </div>
       </div>
 
-      <TaskForm
-        sections={plan.sections}
-        draft={draft}
-        setDraft={setDraft}
-        onSubmit={addTask}
-        submitLabel="Add task"
-      />
+      <div className="workspace-actions">
+        <button type="button" className="primary-button" onClick={onNewTask}>
+          <Plus size={16} aria-hidden="true" />
+          Add task
+        </button>
+      </div>
 
       <div className="section-editor">
         {plan.sections.map((section) => (
@@ -1165,6 +1311,7 @@ function WeeklyView({
                     task={task}
                     section={section}
                     now={now}
+                    onEdit={() => onEditTask(task)}
                     onStart={() => startTimer(task.id)}
                     onStop={() => stopTimer(task.id)}
                     onStatus={(status) => setTaskStatus(task.id, status)}

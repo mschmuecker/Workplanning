@@ -307,9 +307,11 @@ function PlannerApp({ user, signOut }: { user: NetlifyUser; signOut: () => Promi
             <CalendarDays size={22} aria-hidden="true" />
           </div>
           <div>
-            <p className="eyebrow">Weekly workplan</p>
+            <p className="eyebrow">{plan.ownerRole || "Weekly workplan"}</p>
             <h1>{plan.ownerName}</h1>
-            <p className="account-line">{user.email}</p>
+            <p className="account-line">
+              {formatWeekLabel(plan.weekStart)} · {user.email}
+            </p>
           </div>
         </div>
 
@@ -349,21 +351,6 @@ function PlannerApp({ user, signOut }: { user: NetlifyUser; signOut: () => Promi
       </header>
 
       <main>
-        <section className="week-hero">
-          <div>
-            <p className="eyebrow">{plan.ownerRole}</p>
-            <h2>{formatWeekLabel(plan.weekStart)}</h2>
-            <p className="hero-copy">
-              Planned work, actual time, and unplanned interruptions are tracked in one
-              place so the weekly gap stays visible.
-            </p>
-          </div>
-          <div className="hero-stat">
-            <span>Updated</span>
-            <strong>{new Date(plan.updatedAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}</strong>
-          </div>
-        </section>
-
         <section className="metrics-grid" aria-label="Weekly summary">
           {metrics.map((metric) => (
             <article className={`metric metric-${metric.tone}`} key={metric.label}>

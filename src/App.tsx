@@ -1,6 +1,8 @@
 import {
   BarChart3,
   CalendarDays,
+  ChevronDown,
+  ChevronRight,
   Clock,
   Eye,
   ListChecks,
@@ -80,6 +82,7 @@ function PlannerApp({ user, signOut }: { user: NetlifyUser; signOut: () => Promi
   const [selectedDay, setSelectedDay] = useState<DayKey>(() => getTodayKey());
   const [taskEditor, setTaskEditor] = useState<TaskEditorState | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [summaryOpen, setSummaryOpen] = useState(false);
   const [newSectionName, setNewSectionName] = useState("");
 
   useEffect(() => {
@@ -175,8 +178,8 @@ function PlannerApp({ user, signOut }: { user: NetlifyUser; signOut: () => Promi
     }));
   }
 
-  function openCreateTask(day: DayKey | "backlog", planned: boolean) {
-    setTaskEditor(createTaskEditorState(plan.sections[0]?.id ?? "", day, planned));
+  function openCreateTask(days: DayKey[], planned: boolean) {
+    setTaskEditor(createTaskEditorState(plan.sections[0]?.id ?? "", days, planned));
   }
 
   function openEditTask(task: WorkTask) {
@@ -187,28 +190,38 @@ function PlannerApp({ user, signOut }: { user: NetlifyUser; signOut: () => Promi
     const title = state.title.trim();
     if (!title) return;
     const estimateHours = Number(state.estimateHours) || 0;
+    const enteredActualSeconds = Math.max(0, Math.round((Number(state.actualHours) || 0) * 3600));
 
     if (state.taskId) {
-      updateTask(state.taskId, (task) => ({
-        ...task,
-        title,
-        sectionId: state.sectionId,
-        day: state.day,
-        estimateHours,
-        planned: state.planned,
-        status: state.status,
-        notes: state.notes,
-      }));
+      updateTask(state.taskId, (task) => {
+        // Only treat time-worked as a manual override when it actually changed,
+        // so editing other fields never disturbs a stored or running timer. When
+        // it did change, adopt the new total and stop any running timer to avoid
+        // double-counting on top of the manual value.
+        const actualChanged = enteredActualSeconds !== task.actualSeconds;
+        return {
+          ...task,
+          title,
+          sectionId: state.sectionId,
+          days: state.days,
+          estimateHours,
+          planned: state.planned,
+          status: state.status,
+          notes: state.notes,
+          actualSeconds: actualChanged ? enteredActualSeconds : task.actualSeconds,
+          timerStartedAt: actualChanged ? null : task.timerStartedAt,
+        };
+      });
     } else {
       const task: WorkTask = {
         id: createId("task"),
         title,
         sectionId: state.sectionId || plan.sections[0]?.id || "",
-        day: state.day,
+        days: state.days,
         estimateHours,
         planned: state.planned,
         status: state.status,
-        actualSeconds: 0,
+        actualSeconds: enteredActualSeconds,
         timerStartedAt: null,
         notes: state.notes,
         createdAt: new Date().toISOString(),
@@ -351,14 +364,38 @@ function PlannerApp({ user, signOut }: { user: NetlifyUser; signOut: () => Promi
       </header>
 
       <main>
-        <section className="metrics-grid" aria-label="Weekly summary">
-          {metrics.map((metric) => (
-            <article className={`metric metric-${metric.tone}`} key={metric.label}>
-              <span>{metric.label}</span>
-              <strong>{metric.value}</strong>
-              <p>{metric.detail}</p>
-            </article>
-          ))}
+        <section className="metrics-section" aria-label="Weekly summary">
+          <button
+            type="button"
+            className="metrics-toggle"
+            aria-expanded={summaryOpen}
+            onClick={() => setSummaryOpen((value) => !value)}
+          >
+            {summaryOpen ? (
+              <ChevronDown size={16} aria-hidden="true" />
+            ) : (
+              <ChevronRight size={16} aria-hidden="true" />
+            )}
+            Weekly summary
+            {!summaryOpen && (
+              <span className="metrics-peek">
+                {formatHours(summary.plannedEstimate)} planned ·{" "}
+                {formatHours(summary.actualHours)} tracked · {summary.completionRate}% done
+              </span>
+            )}
+          </button>
+
+          {summaryOpen && (
+            <div className="metrics-grid">
+              {metrics.map((metric) => (
+                <article className={`metric metric-${metric.tone}`} key={metric.label}>
+                  <span>{metric.label}</span>
+                  <strong>{metric.value}</strong>
+                  <p>{metric.detail}</p>
+                </article>
+              ))}
+            </div>
+          )}
         </section>
 
         {view === "manager" ? (
@@ -370,7 +407,7 @@ function PlannerApp({ user, signOut }: { user: NetlifyUser; signOut: () => Promi
               capacityHours={plan.weeklyCapacityHours}
               onAddPlanned={() => {
                 setTab("weekly");
-                openCreateTask("backlog", true);
+                openCreateTask([], true);
               }}
               onGoWeekly={() => setTab("weekly")}
               onStartDay={() => setTab("daily")}
@@ -408,7 +445,7 @@ function PlannerApp({ user, signOut }: { user: NetlifyUser; signOut: () => Promi
                 plan={plan}
                 selectedDay={selectedDay}
                 setSelectedDay={setSelectedDay}
-                onNewTask={() => openCreateTask(selectedDay, false)}
+                onNewTask={() => openCreateTask([selectedDay], false)}
                 onEditTask={openEditTask}
                 startTimer={startTimer}
                 stopTimer={stopTimer}
@@ -422,7 +459,7 @@ function PlannerApp({ user, signOut }: { user: NetlifyUser; signOut: () => Promi
             {tab === "weekly" && (
               <WeeklyView
                 plan={plan}
-                onNewTask={() => openCreateTask("backlog", true)}
+                onNewTask={() => openCreateTask([], true)}
                 onEditTask={openEditTask}
                 updateSection={updateSection}
                 addSection={addSection}

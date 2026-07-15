@@ -9,15 +9,21 @@ export interface TaskEditorState {
   title: string;
   sectionId: string;
   estimateHours: string;
-  day: DayKey | "backlog";
+  actualHours: string; // manually-entered time worked, in decimal hours
+  days: DayKey[]; // scheduled days; empty = unscheduled
   planned: boolean;
   status: TaskStatus;
   notes: string;
 }
 
+// Round seconds to a friendly decimal-hours string (e.g. 5400 -> "1.5").
+function secondsToHoursString(seconds: number): string {
+  return String(Math.round((seconds / 3600) * 100) / 100);
+}
+
 export function createTaskEditorState(
   sectionId: string,
-  day: DayKey | "backlog",
+  days: DayKey[],
   planned = true,
 ): TaskEditorState {
   return {
@@ -25,7 +31,8 @@ export function createTaskEditorState(
     title: "",
     sectionId,
     estimateHours: "1",
-    day,
+    actualHours: "0",
+    days,
     planned,
     status: "planned",
     notes: "",
@@ -38,7 +45,8 @@ export function editorStateFromTask(task: WorkTask): TaskEditorState {
     title: task.title,
     sectionId: task.sectionId,
     estimateHours: String(task.estimateHours),
-    day: task.day,
+    actualHours: secondsToHoursString(task.actualSeconds),
+    days: [...task.days],
     planned: task.planned,
     status: task.status,
     notes: task.notes,
@@ -117,20 +125,30 @@ export function TaskEditorModal({
             </select>
           </label>
           <label>
-            <span>Day</span>
-            <select
-              value={state.day}
-              onChange={(event) =>
-                onChange({ ...state, day: event.target.value as DayKey | "backlog" })
-              }
-            >
-              <option value="backlog">Unscheduled</option>
-              {dayOptions.map((day) => (
-                <option key={day.key} value={day.key}>
-                  {day.label}
-                </option>
-              ))}
-            </select>
+            <span>Days {state.days.length === 0 ? "(unscheduled)" : ""}</span>
+            <div className="day-toggle-group" role="group" aria-label="Scheduled days">
+              {dayOptions.map((day) => {
+                const active = state.days.includes(day.key);
+                return (
+                  <button
+                    key={day.key}
+                    type="button"
+                    className={`day-chip ${active ? "active" : ""}`}
+                    aria-pressed={active}
+                    onClick={() =>
+                      onChange({
+                        ...state,
+                        days: active
+                          ? state.days.filter((d) => d !== day.key)
+                          : [...state.days, day.key],
+                      })
+                    }
+                  >
+                    {day.short}
+                  </button>
+                );
+              })}
+            </div>
           </label>
         </div>
 
@@ -146,19 +164,31 @@ export function TaskEditorModal({
             />
           </label>
           <label>
-            <span>Status</span>
-            <select
-              value={state.status}
-              onChange={(event) => onChange({ ...state, status: event.target.value as TaskStatus })}
-            >
-              {(["planned", "active", "done", "blocked"] as TaskStatus[]).map((status) => (
-                <option key={status} value={status}>
-                  {statusLabels[status]}
-                </option>
-              ))}
-            </select>
+            <span>Time worked (hours)</span>
+            <input
+              type="number"
+              min="0"
+              step="0.25"
+              value={state.actualHours}
+              onChange={(event) => onChange({ ...state, actualHours: event.target.value })}
+              placeholder="e.g. 1.5 = 1h 30m"
+            />
           </label>
         </div>
+
+        <label>
+          <span>Status</span>
+          <select
+            value={state.status}
+            onChange={(event) => onChange({ ...state, status: event.target.value as TaskStatus })}
+          >
+            {(["planned", "active", "done", "blocked"] as TaskStatus[]).map((status) => (
+              <option key={status} value={status}>
+                {statusLabels[status]}
+              </option>
+            ))}
+          </select>
+        </label>
 
         <label className="check-label modal-check">
           <input

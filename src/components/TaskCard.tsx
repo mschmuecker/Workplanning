@@ -12,7 +12,7 @@ export function TaskCard({
   onStop,
   onStatus,
   onDelete,
-  onAssignDay,
+  onToggleDay,
 }: {
   task: WorkTask;
   section: WorkSection;
@@ -22,7 +22,7 @@ export function TaskCard({
   onStop: () => void;
   onStatus: (status: TaskStatus) => void;
   onDelete: () => void;
-  onAssignDay: (day: DayKey | "backlog") => void;
+  onToggleDay: (day: DayKey) => void;
 }) {
   const actualSeconds = secondsForTask(task, now);
   const actualHours = actualSeconds / 3600;
@@ -53,21 +53,27 @@ export function TaskCard({
             {formatHours(variance)}
           </span>
         </div>
+
+        <div className="task-days" role="group" aria-label="Scheduled days">
+          {dayOptions.map((day) => {
+            const active = task.days.includes(day.key);
+            return (
+              <button
+                key={day.key}
+                type="button"
+                className={`day-chip ${active ? "active" : ""}`}
+                aria-pressed={active}
+                title={active ? `Remove from ${day.label}` : `Add to ${day.label}`}
+                onClick={() => onToggleDay(day.key)}
+              >
+                {day.short}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       <div className="task-controls">
-        <select
-          value={task.day}
-          onChange={(event) => onAssignDay(event.target.value as DayKey | "backlog")}
-          aria-label={`Assign ${task.title} to day`}
-        >
-          <option value="backlog">Unscheduled</option>
-          {dayOptions.map((day) => (
-            <option key={day.key} value={day.key}>
-              {day.short}
-            </option>
-          ))}
-        </select>
         {task.timerStartedAt ? (
           <button className="icon-button danger-soft" type="button" title="Stop timer" onClick={onStop}>
             <Square size={16} aria-hidden="true" />

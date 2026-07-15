@@ -30,14 +30,38 @@ export function DailyView({
   setPlan: (updater: (plan: WeekPlan) => WeekPlan) => void;
   now: number;
 }) {
-  const dayTasks = plan.tasks.filter((task) => task.day === selectedDay);
-  const backlogTasks = plan.tasks.filter((task) => task.day === "backlog");
+  const dayTasks = plan.tasks.filter((task) => task.days.includes(selectedDay));
+  // "Available to add" = anything not already on this day and not finished, so a
+  // multi-day or overrunning task stays pullable into any day until it's done.
+  const availableTasks = plan.tasks.filter(
+    (task) => !task.days.includes(selectedDay) && task.status !== "done",
+  );
   const selectedDayLabel = dayOptions.find((day) => day.key === selectedDay)?.label ?? "Monday";
 
-  function assignTask(taskId: string, day: DayKey | "backlog") {
+  function toggleDay(taskId: string, day: DayKey) {
     setPlan((current) => ({
       ...current,
-      tasks: current.tasks.map((task) => (task.id === taskId ? { ...task, day } : task)),
+      tasks: current.tasks.map((task) =>
+        task.id === taskId
+          ? {
+              ...task,
+              days: task.days.includes(day)
+                ? task.days.filter((d) => d !== day)
+                : [...task.days, day],
+            }
+          : task,
+      ),
+    }));
+  }
+
+  function addDay(taskId: string, day: DayKey) {
+    setPlan((current) => ({
+      ...current,
+      tasks: current.tasks.map((task) =>
+        task.id === taskId && !task.days.includes(day)
+          ? { ...task, days: [...task.days, day] }
+          : task,
+      ),
     }));
   }
 
@@ -87,33 +111,34 @@ export function DailyView({
                 onStop={() => stopTimer(task.id)}
                 onStatus={(status) => setTaskStatus(task.id, status)}
                 onDelete={() => deleteTask(task.id)}
-                onAssignDay={(day) => assignTask(task.id, day)}
+                onToggleDay={(day) => toggleDay(task.id, day)}
               />
             ))
           ) : (
-            <EmptyState title="No tasks planned for this day" detail="Pull work forward from the unscheduled list or log unplanned work above." />
+            <EmptyState title="No tasks planned for this day" detail="Add work from the available list, or log new work above." />
           )}
         </div>
 
         <aside className="flow-column compact">
           <div className="column-heading">
-            <h3>Unscheduled</h3>
-            <span>{backlogTasks.length} tasks</span>
+            <h3>Available to add</h3>
+            <span>{availableTasks.length} tasks</span>
           </div>
-          {backlogTasks.length ? (
-            backlogTasks.map((task) => (
+          {availableTasks.length ? (
+            availableTasks.map((task) => (
               <button
                 className="backlog-row"
                 key={task.id}
                 type="button"
-                onClick={() => assignTask(task.id, selectedDay)}
+                title={`Add "${task.title}" to ${selectedDayLabel}`}
+                onClick={() => addDay(task.id, selectedDay)}
               >
                 <span>{task.title}</span>
                 <strong>{formatHours(task.estimateHours)}</strong>
               </button>
             ))
           ) : (
-            <EmptyState title="Backlog is clear" detail="Weekly plan tasks assigned to a day will appear in the daily view." />
+            <EmptyState title="Nothing left to add" detail="Every open task is already on this day. Log new work above to add more." />
           )}
         </aside>
       </div>

@@ -18,7 +18,7 @@ export function ManagerView({ plan, now }: { plan: WeekPlan; now: number }) {
 
       <div className="manager-days">
         {dayOptions.map((day) => {
-          const tasks = plan.tasks.filter((task) => task.day === day.key);
+          const tasks = plan.tasks.filter((task) => task.days.includes(day.key));
           return (
             <section className="manager-day" key={day.key}>
               <div className="column-heading">

@@ -33,10 +33,19 @@ export function WeeklyView({
   setPlan: (updater: (plan: WeekPlan) => WeekPlan) => void;
   now: number;
 }) {
-  function assignTask(taskId: string, day: DayKey | "backlog") {
+  function toggleDay(taskId: string, day: DayKey) {
     setPlan((current) => ({
       ...current,
-      tasks: current.tasks.map((task) => (task.id === taskId ? { ...task, day } : task)),
+      tasks: current.tasks.map((task) =>
+        task.id === taskId
+          ? {
+              ...task,
+              days: task.days.includes(day)
+                ? task.days.filter((d) => d !== day)
+                : [...task.days, day],
+            }
+          : task,
+      ),
     }));
   }
 
@@ -122,7 +131,7 @@ export function WeeklyView({
                     onStop={() => stopTimer(task.id)}
                     onStatus={(status) => setTaskStatus(task.id, status)}
                     onDelete={() => deleteTask(task.id)}
-                    onAssignDay={(day) => assignTask(task.id, day)}
+                    onToggleDay={(day) => toggleDay(task.id, day)}
                   />
                 ))
               ) : (

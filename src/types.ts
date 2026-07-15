@@ -14,7 +14,7 @@ export interface WorkTask {
   id: string;
   title: string;
   sectionId: string;
-  day: DayKey | "backlog";
+  days: DayKey[]; // scheduled days; empty = unscheduled. A task may span several days.
   estimateHours: number;
   planned: boolean;
   status: TaskStatus;

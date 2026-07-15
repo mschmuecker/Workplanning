@@ -309,7 +309,39 @@ textarea {
 
 .metrics-grid {
   grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 12px 0 0;
+}
+
+.metrics-section {
   margin: 18px 0;
+}
+
+.metrics-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid #d7dee8;
+  border-radius: 8px;
+  color: #172033;
+  background: rgba(255, 255, 255, 0.88);
+  font-weight: 800;
+}
+
+.metrics-peek {
+  margin-left: auto;
+  color: #64748b;
+  font-size: 0.84rem;
+  font-weight: 700;
+  text-align: right;
+}
+
+@media (max-width: 560px) {
+  .metrics-peek {
+    display: none;
+  }
 }
 
 .metric,
@@ -561,8 +593,10 @@ textarea {
 }
 
 .section-edit-row {
-  grid-template-columns: 48px minmax(160px, 0.4fr) minmax(220px, 1fr);
+  display: grid;
+  grid-template-columns: 40px minmax(130px, 1fr) minmax(260px, 2.6fr);
   gap: 10px;
+  align-items: center;
 }
 
 .section-edit-row input[type="color"] {
@@ -913,6 +947,38 @@ textarea {
 .primary-button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
+}
+
+.task-days,
+.day-toggle-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.task-days {
+  margin-top: 12px;
+}
+
+.day-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  min-height: 32px;
+  padding: 0 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  color: #475569;
+  background: #ffffff;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.day-chip.active {
+  color: #ffffff;
+  border-color: #1f6feb;
+  background: #1f6feb;
 }
 
 @media (max-width: 560px) {

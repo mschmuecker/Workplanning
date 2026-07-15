@@ -223,16 +223,44 @@ function PlannerApp({ user, signOut }: { user: NetlifyUser; signOut: () => Promi
   const { plan, setPlan, syncState } = usePlanPersistence();
   const [now, setNow] = useState(Date.now());
   const [view, setView] = useState<WorkView>("planner");
-  const [tab, setTab] = useState<PlannerTab>("daily");
+  // Initial tab reflects weekly readiness: if the week isn't fully planned yet,
+  // start on the weekly plan; otherwise drop straight into daily execution.
+  // Only the initial value is derived — the tab stays user-switchable afterward.
+  const [tab, setTab] = useState<PlannerTab>(() => {
+    const plannedEstimate = plan.tasks
+      .filter((task) => task.planned)
+      .reduce((sum, task) => sum + task.estimateHours, 0);
+    return plannedEstimate < plan.weeklyCapacityHours ? "weekly" : "daily";
+  });
   const [selectedDay, setSelectedDay] = useState<DayKey>(() => getTodayKey());
   const [taskEditor, setTaskEditor] = useState<TaskEditorState | null>(null);
-  const [showSettings, setShowSettings] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [newSectionName, setNewSectionName] = useState("");
 
   useEffect(() => {
     const interval = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(interval);
   }, []);
+
+  // Change 3: seed the owner name from the signed-in account, but never clobber
+  // a name the user has deliberately set. Runs when the plan/user is ready.
+  useEffect(() => {
+    const needsSeed = !plan.ownerName.trim() || plan.ownerName === "Your Name";
+    if (!needsSeed) return;
+    // The gotrue/Netlify runtime user carries a snake_case `user_metadata`
+    // (matching DEV_USER); the shipped TS type only exposes camelCase, so read
+    // the real runtime field through a narrow cast.
+    const fullName = (user as unknown as { user_metadata?: { full_name?: string } })
+      .user_metadata?.full_name;
+    const derived = fullName || user.email?.split("@")[0] || "Your Name";
+    if (derived === plan.ownerName) return;
+    setPlan((current) => {
+      const stillNeeds = !current.ownerName.trim() || current.ownerName === "Your Name";
+      return stillNeeds ? { ...current, ownerName: derived } : current;
+    });
+    // setPlan is stable from usePlanPersistence; guarded so it self-terminates.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plan.ownerName, user]);
 
   const summary = useMemo(() => {
     const plannedTasks = plan.tasks.filter((task) => task.planned);
@@ -468,7 +496,7 @@ function PlannerApp({ user, signOut }: { user: NetlifyUser; signOut: () => Promi
             className="icon-button"
             type="button"
             title="Settings"
-            onClick={() => setShowSettings((value) => !value)}
+            onClick={() => setSettingsOpen(true)}
           >
             <Settings2 size={18} aria-hidden="true" />
           </button>
@@ -476,61 +504,6 @@ function PlannerApp({ user, signOut }: { user: NetlifyUser; signOut: () => Promi
       </header>
 
       <main>
-        {showSettings && (
-          <section className="settings-band">
-            <label>
-              <span>Name</span>
-              <input
-                value={plan.ownerName}
-                onChange={(event) =>
-                  setPlan((current) => ({ ...current, ownerName: event.target.value }))
-                }
-              />
-            </label>
-            <label>
-              <span>Role</span>
-              <input
-                value={plan.ownerRole}
-                onChange={(event) =>
-                  setPlan((current) => ({ ...current, ownerRole: event.target.value }))
-                }
-              />
-            </label>
-            <label>
-              <span>Capacity</span>
-              <input
-                type="number"
-                min="1"
-                step="0.5"
-                value={plan.weeklyCapacityHours}
-                onChange={(event) =>
-                  setPlan((current) => ({
-                    ...current,
-                    weeklyCapacityHours: Number(event.target.value) || 0,
-                  }))
-                }
-              />
-            </label>
-            <label>
-              <span>Week starts</span>
-              <input
-                type="date"
-                value={plan.weekStart}
-                onChange={(event) =>
-                  setPlan((current) => ({
-                    ...current,
-                    weekStart: event.target.value || getWeekStartIso(),
-                  }))
-                }
-              />
-            </label>
-            <button className="secondary-button" type="button" onClick={startNewWeek}>
-              <RefreshCw size={16} aria-hidden="true" />
-              Start blank week
-            </button>
-          </section>
-        )}
-
         <section className="week-hero">
           <div>
             <p className="eyebrow">{plan.ownerRole}</p>
@@ -560,6 +533,17 @@ function PlannerApp({ user, signOut }: { user: NetlifyUser; signOut: () => Promi
           <ManagerView plan={plan} now={now} />
         ) : (
           <>
+            <PlanningBanner
+              plannedEstimate={summary.plannedEstimate}
+              capacityHours={plan.weeklyCapacityHours}
+              onAddPlanned={() => {
+                setTab("weekly");
+                openCreateTask("backlog", true);
+              }}
+              onGoWeekly={() => setTab("weekly")}
+              onStartDay={() => setTab("daily")}
+            />
+
             <nav className="tabbar" aria-label="Planner sections">
               <button
                 className={tab === "daily" ? "active" : ""}
@@ -636,6 +620,203 @@ function PlannerApp({ user, signOut }: { user: NetlifyUser; signOut: () => Promi
           onDelete={taskEditor.taskId ? () => deleteFromEditor(taskEditor.taskId!) : undefined}
         />
       )}
+
+      {settingsOpen && (
+        <SettingsModal
+          plan={plan}
+          setPlan={setPlan}
+          onClose={() => setSettingsOpen(false)}
+          onStartNewWeek={() => {
+            startNewWeek();
+            setSettingsOpen(false);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function PlanningBanner({
+  plannedEstimate,
+  capacityHours,
+  onAddPlanned,
+  onGoWeekly,
+  onStartDay,
+}: {
+  plannedEstimate: number;
+  capacityHours: number;
+  onAddPlanned: () => void;
+  onGoWeekly: () => void;
+  onStartDay: () => void;
+}) {
+  const met = plannedEstimate >= capacityHours;
+  const over = plannedEstimate > capacityHours;
+  const remaining = Math.max(0, capacityHours - plannedEstimate);
+  const pct =
+    capacityHours > 0 ? Math.min(100, Math.round((plannedEstimate / capacityHours) * 100)) : 0;
+  const fillTone = over ? "over" : met ? "met" : "under";
+
+  return (
+    <section className={`planning-banner ${met ? "is-met" : "is-under"}`} aria-label="Weekly planning status">
+      <div className="planning-banner-body">
+        <div className="planning-banner-head">
+          {met ? (
+            <CheckCircle2 size={20} aria-hidden="true" />
+          ) : (
+            <AlertCircle size={20} aria-hidden="true" />
+          )}
+          <div>
+            <h3>{met ? "Your week is fully planned" : "Your week isn't fully planned yet"}</h3>
+            <p>
+              {met
+                ? `You've planned ${formatHours(plannedEstimate)} against your ${formatHours(
+                    capacityHours,
+                  )} capacity${over ? " (over capacity)" : ""}. Time to execute day by day.`
+                : `${formatHours(plannedEstimate)} planned of ${formatHours(
+                    capacityHours,
+                  )} capacity — about ${formatHours(remaining)} left to plan.`}
+            </p>
+          </div>
+        </div>
+
+        <div
+          className="capacity-meter"
+          role="progressbar"
+          aria-valuenow={pct}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-label="Planned load vs. capacity"
+        >
+          <div className={`capacity-meter-fill tone-${fillTone}`} style={{ width: `${pct}%` }} />
+        </div>
+        <div className="capacity-meter-label">
+          <span>{formatHours(plannedEstimate)} planned</span>
+          <span>{formatHours(capacityHours)} capacity</span>
+        </div>
+      </div>
+
+      <div className="planning-banner-actions">
+        {met ? (
+          <button type="button" className="primary-button" onClick={onStartDay}>
+            <Clock size={16} aria-hidden="true" />
+            Start your day
+          </button>
+        ) : (
+          <>
+            <button type="button" className="primary-button" onClick={onAddPlanned}>
+              <Plus size={16} aria-hidden="true" />
+              Add planned work
+            </button>
+            <button type="button" className="secondary-button" onClick={onGoWeekly}>
+              <ListChecks size={16} aria-hidden="true" />
+              Go to weekly plan
+            </button>
+          </>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function SettingsModal({
+  plan,
+  setPlan,
+  onClose,
+  onStartNewWeek,
+}: {
+  plan: WeekPlan;
+  setPlan: (updater: (plan: WeekPlan) => WeekPlan) => void;
+  onClose: () => void;
+  onStartNewWeek: () => void;
+}) {
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div className="modal-overlay" role="presentation" onMouseDown={onClose}>
+      <div
+        className="modal-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Settings"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="modal-head">
+          <h2>Settings</h2>
+          <button type="button" className="icon-button" title="Close" onClick={onClose}>
+            <X size={18} aria-hidden="true" />
+          </button>
+        </div>
+
+        <div className="modal-row">
+          <label>
+            <span>Name</span>
+            <input
+              value={plan.ownerName}
+              onChange={(event) =>
+                setPlan((current) => ({ ...current, ownerName: event.target.value }))
+              }
+            />
+          </label>
+          <label>
+            <span>Role</span>
+            <input
+              value={plan.ownerRole}
+              onChange={(event) =>
+                setPlan((current) => ({ ...current, ownerRole: event.target.value }))
+              }
+            />
+          </label>
+        </div>
+
+        <div className="modal-row">
+          <label>
+            <span>Capacity</span>
+            <input
+              type="number"
+              min="1"
+              step="0.5"
+              value={plan.weeklyCapacityHours}
+              onChange={(event) =>
+                setPlan((current) => ({
+                  ...current,
+                  weeklyCapacityHours: Number(event.target.value) || 0,
+                }))
+              }
+            />
+          </label>
+          <label>
+            <span>Week starts</span>
+            <input
+              type="date"
+              value={plan.weekStart}
+              onChange={(event) =>
+                setPlan((current) => ({
+                  ...current,
+                  weekStart: event.target.value || getWeekStartIso(),
+                }))
+              }
+            />
+          </label>
+        </div>
+
+        <div className="modal-foot">
+          <button type="button" className="secondary-button" onClick={onStartNewWeek}>
+            <RefreshCw size={16} aria-hidden="true" />
+            Start blank week
+          </button>
+          <div className="modal-foot-actions">
+            <button type="button" className="primary-button" onClick={onClose}>
+              Done
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

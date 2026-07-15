@@ -8,6 +8,8 @@ stays visible instead of getting lost.
 Built with React, TypeScript, and Vite on the front end, and Netlify
 (Functions + Blobs + Identity) for authenticated, per-user persistence.
 
+netlify site for production access: https://tiny-belekoy-824d15.netlify.app/
+
 ## What it does
 
 - **Weekly plan** — group work into color-coded sections (e.g. Projects,

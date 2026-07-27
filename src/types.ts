@@ -22,6 +22,10 @@ export interface WorkTask {
   timerStartedAt: string | null;
   notes: string;
   createdAt: string;
+  // Optional provenance for imported tasks. Backward-compatible: existing tasks
+  // omit these and are treated as manual.
+  source?: "manual" | "ics" | "outlook-calendar" | "outlook-todo";
+  sourceId?: string; // external event UID, used for idempotent re-import
 }
 
 export interface WeekPlan {
@@ -33,5 +37,11 @@ export interface WeekPlan {
   reviewNotes: string;
   sections: WorkSection[];
   tasks: WorkTask[];
+  updatedAt: string;
+}
+
+export interface Workspace {
+  weeks: Record<string, WeekPlan>; // keyed by weekStart (YYYY-MM-DD Monday)
+  activeWeekStart: string;
   updatedAt: string;
 }

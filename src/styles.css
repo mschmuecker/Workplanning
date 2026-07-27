@@ -312,6 +312,74 @@ textarea {
   margin: 12px 0 0;
 }
 
+.week-switcher {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 10px 14px;
+  border: 1px solid #d7dee8;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.week-switcher-nav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 800;
+}
+
+.week-switcher-nav .icon-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.week-label {
+  display: inline-flex;
+  align-items: center;
+  min-width: 150px;
+  justify-content: center;
+}
+
+.week-jump {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 0;
+}
+
+.week-jump-label {
+  display: inline;
+  margin-bottom: 0;
+  color: #64748b;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.week-jump input {
+  width: auto;
+  min-height: 34px;
+}
+
+@media (max-width: 560px) {
+  .week-jump-label {
+    display: none;
+  }
+}
+
+.week-current-pill {
+  margin-left: 8px;
+  padding: 0 8px;
+  border-radius: 999px;
+  color: #166534;
+  background: #dcfce7;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
 .metrics-section {
   margin: 18px 0;
 }
@@ -336,6 +404,35 @@ textarea {
   font-size: 0.84rem;
   font-weight: 700;
   text-align: right;
+}
+
+.metrics-toggle-title {
+  white-space: nowrap;
+}
+
+.metrics-toggle.status-green {
+  border-color: #86efac;
+  background: #ecfdf5;
+}
+
+.metrics-toggle.status-yellow {
+  border-color: #fcd34d;
+  background: #fffbeb;
+}
+
+.metrics-toggle.status-red {
+  border-color: #fca5a5;
+  background: #fef2f2;
+}
+
+.metrics-expanded {
+  display: grid;
+  gap: 14px;
+  margin-top: 12px;
+}
+
+.metrics-expanded .metrics-grid {
+  margin-top: 0;
 }
 
 @media (max-width: 560px) {
@@ -883,7 +980,104 @@ textarea {
 .workspace-actions {
   display: flex;
   justify-content: flex-end;
+  gap: 10px;
   margin-bottom: 18px;
+}
+
+/* Fail-soft notice for Outlook/Graph problems: informational, never blocking. */
+.outlook-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: -8px 0 18px;
+  padding: 10px 12px;
+  border: 1px solid #fecaca;
+  border-radius: 10px;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: 0.85rem;
+}
+
+.pill-source {
+  color: #6d28d9;
+  background: #ede9fe;
+}
+
+.task-pills {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.ics-list {
+  display: grid;
+  gap: 8px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.ics-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+  cursor: pointer;
+}
+
+/* Override the global full-width input rule so the checkbox stays small. */
+.ics-check {
+  width: 18px;
+  min-width: 18px;
+  height: 18px;
+  min-height: 18px;
+  margin: 0;
+  padding: 0;
+}
+
+.ics-row-main {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.ics-row-title {
+  overflow-wrap: anywhere;
+  font-weight: 700;
+}
+
+.ics-row-cats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ics-cat {
+  padding: 1px 8px;
+  border-radius: 999px;
+  color: #6d28d9;
+  background: #ede9fe;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.ics-row-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #475569;
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+.ics-row-day {
+  font-weight: 700;
 }
 
 .modal-overlay {
@@ -929,6 +1123,15 @@ textarea {
 
 .modal-check {
   min-height: auto;
+}
+
+.modal-note {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 7px;
+  color: #475569;
+  background: #f1f5f9;
+  font-size: 0.9rem;
 }
 
 .modal-foot {

@@ -1,4 +1,4 @@
-import type { DayKey, WeekPlan, WorkTask } from "./types";
+import type { DayKey, WeekPlan, Workspace, WorkTask } from "./types";
 
 export const dayOptions: Array<{ key: DayKey; label: string; short: string }> = [
   { key: "mon", label: "Monday", short: "Mon" },
@@ -98,6 +98,67 @@ export function createDefaultPlan(): WeekPlan {
       task("Document decisions and handoffs", "section-growth", 2, ["thu"]),
       task("Friday review and next-week carryover", "section-growth", 1, ["fri"]),
     ],
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+// Add N days to a YYYY-MM-DD date and return YYYY-MM-DD, using the same en-CA
+// formatting used for storage week keys.
+export function addDaysToIso(iso: string, days: number): string {
+  const date = new Date(`${iso}T00:00:00`);
+  date.setDate(date.getDate() + days);
+  return storageWeekFormat.format(date);
+}
+
+// Build fresh copies of the unfinished tasks so they can seed a new week without
+// carrying over timers, tracked time, or day scheduling.
+export function carryOverTasks(tasks: WorkTask[]): WorkTask[] {
+  return tasks
+    .filter((task) => task.status !== "done")
+    // Calendar-sourced tasks belong to their specific week and never carry over.
+    .filter((task) => task.source !== "ics" && task.source !== "outlook-calendar")
+    .map((task) => ({
+      id: createId("task"),
+      title: task.title,
+      sectionId: task.sectionId,
+      days: [],
+      estimateHours: task.estimateHours,
+      planned: task.planned,
+      status: "planned" as const,
+      actualSeconds: 0,
+      timerStartedAt: null,
+      notes: task.notes,
+      createdAt: new Date().toISOString(),
+      // Carried-over tasks become plain planning items; drop any provenance.
+      source: undefined,
+      sourceId: undefined,
+    }));
+}
+
+export function createWeekPlan(
+  weekStart: string,
+  template: Pick<WeekPlan, "ownerName" | "ownerRole" | "weeklyCapacityHours" | "sections">,
+  tasks: WorkTask[],
+): WeekPlan {
+  return {
+    id: `week-${weekStart}`,
+    ownerName: template.ownerName,
+    ownerRole: template.ownerRole,
+    weekStart,
+    weeklyCapacityHours: template.weeklyCapacityHours,
+    reviewNotes: "",
+    // Deep-copy sections so weeks never share references.
+    sections: template.sections.map((section) => ({ ...section })),
+    tasks,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+export function createDefaultWorkspace(): Workspace {
+  const plan = createDefaultPlan();
+  return {
+    weeks: { [plan.weekStart]: plan },
+    activeWeekStart: plan.weekStart,
     updatedAt: new Date().toISOString(),
   };
 }

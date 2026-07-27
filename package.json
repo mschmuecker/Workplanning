@@ -4,12 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite --host 127.0.0.1",
+    "dev": "vite --host localhost",
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "netlify:dev": "netlify dev"
   },
   "dependencies": {
+    "@azure/msal-browser": "^5.17.1",
     "@netlify/blobs": "^9.1.2",
     "@netlify/identity": "^1.2.0",
     "lucide-react": "^0.468.0",

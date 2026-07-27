@@ -7,12 +7,12 @@ export function SettingsModal({
   plan,
   setPlan,
   onClose,
-  onStartNewWeek,
+  onClearWeek,
 }: {
   plan: WeekPlan;
   setPlan: (updater: (plan: WeekPlan) => WeekPlan) => void;
   onClose: () => void;
-  onStartNewWeek: () => void;
+  onClearWeek: () => void;
 }) {
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -91,9 +91,9 @@ export function SettingsModal({
         </div>
 
         <div className="modal-foot">
-          <button type="button" className="secondary-button" onClick={onStartNewWeek}>
+          <button type="button" className="secondary-button" onClick={onClearWeek}>
             <RefreshCw size={16} aria-hidden="true" />
-            Start blank week
+            Clear this week's tasks
           </button>
           <div className="modal-foot-actions">
             <button type="button" className="primary-button" onClick={onClose}>

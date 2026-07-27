@@ -4,12 +4,14 @@ import { formatHours } from "../lib/planMath";
 export function PlanningBanner({
   plannedEstimate,
   capacityHours,
+  showActions = true,
   onAddPlanned,
   onGoWeekly,
   onStartDay,
 }: {
   plannedEstimate: number;
   capacityHours: number;
+  showActions?: boolean;
   onAddPlanned: () => void;
   onGoWeekly: () => void;
   onStartDay: () => void;
@@ -60,6 +62,7 @@ export function PlanningBanner({
         </div>
       </div>
 
+      {showActions && (
       <div className="planning-banner-actions">
         {met ? (
           <button type="button" className="primary-button" onClick={onStartDay}>
@@ -79,6 +82,7 @@ export function PlanningBanner({
           </>
         )}
       </div>
+      )}
     </section>
   );
 }

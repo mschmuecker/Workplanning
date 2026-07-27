@@ -12,18 +12,23 @@ import {
 import { type User as NetlifyUser } from "@netlify/identity";
 import { useEffect, useMemo, useState } from "react";
 import {
-  createDefaultPlan,
   createId,
   getTodayKey,
+  getWeekStartIso,
 } from "./plannerData";
 import type { DayKey, PlannerTab, TaskStatus, WorkSection, WorkTask, WorkView } from "./types";
-import { formatHours, formatWeekLabel, secondsForTask, stopRunningTask } from "./lib/planMath";
+import { formatHours, secondsForTask, stopRunningTask } from "./lib/planMath";
+import { parseIcs, mapEventsToWeek, type ImportCandidate } from "./lib/ics";
+import { ImportIcsModal } from "./components/ImportIcsModal";
 import { useAuth } from "./hooks/useAuth";
+import { useGraphCalendar } from "./hooks/useGraphCalendar";
 import { usePlanPersistence } from "./hooks/usePlanPersistence";
 import { AuthGate } from "./components/AuthGate";
 import { SyncBadge } from "./components/SyncBadge";
 import { PlanningBanner } from "./components/PlanningBanner";
 import { SettingsModal } from "./components/SettingsModal";
+import { WeekSwitcher } from "./components/WeekSwitcher";
+import { NewWeekModal } from "./components/NewWeekModal";
 import {
   TaskEditorModal,
   createTaskEditorState,
@@ -67,7 +72,34 @@ function App() {
 }
 
 function PlannerApp({ user, signOut }: { user: NetlifyUser; signOut: () => Promise<void> }) {
-  const { plan, setPlan, syncState } = usePlanPersistence();
+  const {
+    plan,
+    setPlan,
+    syncState,
+    weekStarts,
+    activeWeekStart,
+    goToWeek,
+    goPrevWeek,
+    goNextWeek,
+    createOrGoToWeek,
+  } = usePlanPersistence();
+  const activeWeekIndex = weekStarts.indexOf(activeWeekStart);
+  const canPrevWeek = activeWeekIndex > 0;
+  const canNextWeek = activeWeekIndex > -1 && activeWeekIndex < weekStarts.length - 1;
+
+  // Jump to the week containing any picked date. If that exact week has no data,
+  // land on the nearest saved week on/before it (or the earliest week otherwise).
+  function jumpToWeekForDate(dateIso: string) {
+    if (!dateIso) return;
+    const target = getWeekStartIso(new Date(`${dateIso}T00:00:00`));
+    if (weekStarts.includes(target)) {
+      goToWeek(target);
+      return;
+    }
+    const onOrBefore = weekStarts.filter((week) => week <= target);
+    const nearest = onOrBefore.length ? onOrBefore[onOrBefore.length - 1] : weekStarts[0];
+    if (nearest) goToWeek(nearest);
+  }
   const [now, setNow] = useState(Date.now());
   const [view, setView] = useState<WorkView>("planner");
   // Initial tab reflects weekly readiness: if the week isn't fully planned yet,
@@ -82,8 +114,17 @@ function PlannerApp({ user, signOut }: { user: NetlifyUser; signOut: () => Promi
   const [selectedDay, setSelectedDay] = useState<DayKey>(() => getTodayKey());
   const [taskEditor, setTaskEditor] = useState<TaskEditorState | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [newWeekOpen, setNewWeekOpen] = useState(false);
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [newSectionName, setNewSectionName] = useState("");
+  // One preview/confirm flow shared by every calendar source; `source` is the
+  // provenance stamped onto newly created tasks.
+  const [calendarImport, setCalendarImport] = useState<{
+    candidates: ImportCandidate[];
+    skipped: number;
+    source: "ics" | "outlook-calendar";
+  } | null>(null);
+  const graph = useGraphCalendar();
 
   useEffect(() => {
     const interval = window.setInterval(() => setNow(Date.now()), 1000);
@@ -170,6 +211,17 @@ function PlannerApp({ user, signOut }: { user: NetlifyUser; signOut: () => Promi
       tone: summary.unplannedHours > 4 ? "orange" : "blue",
     },
   ];
+
+  // Planning readiness drives the collapsible summary's color and label.
+  const plannedRatio =
+    plan.weeklyCapacityHours > 0 ? summary.plannedEstimate / plan.weeklyCapacityHours : 0;
+  const planningStatus = plannedRatio >= 1 ? "green" : plannedRatio >= 0.5 ? "yellow" : "red";
+  const planningLabel =
+    plannedRatio >= 1
+      ? "Fully planned"
+      : plannedRatio >= 0.5
+        ? "Partially planned"
+        : "Barely planned";
 
   function updateTask(taskId: string, updater: (task: WorkTask) => WorkTask) {
     setPlan((current) => ({
@@ -299,17 +351,95 @@ function PlannerApp({ user, signOut }: { user: NetlifyUser; signOut: () => Promi
     setNewSectionName("");
   }
 
-  function startNewWeek() {
-    const nextPlan = createDefaultPlan();
-    setPlan(() => ({
-      ...nextPlan,
-      ownerName: plan.ownerName,
-      ownerRole: plan.ownerRole,
-      weeklyCapacityHours: plan.weeklyCapacityHours,
-      sections: plan.sections,
-      tasks: [],
-    }));
-    setTab("weekly");
+  function handleImportCalendar(text: string) {
+    const events = parseIcs(text);
+    const candidates = mapEventsToWeek(events, plan.weekStart);
+    // Every parsed event that didn't become a candidate (outside the active
+    // week, on a weekend, or all-day) counts as skipped feedback for the user.
+    const skipped = Math.max(0, events.length - candidates.length);
+    setCalendarImport({ candidates, skipped, source: "ics" });
+  }
+
+  // Outlook path: connect (if needed), pull this week from Graph, then hand the
+  // candidates to the same preview modal the ICS import uses.
+  async function handleImportOutlook() {
+    const result = await graph.importWeek(plan.weekStart);
+    if (!result) return; // cancelled or failed; graph.error carries the reason
+    setCalendarImport({ ...result, source: "outlook-calendar" });
+  }
+
+  function confirmCalendarImport(
+    selected: ImportCandidate[],
+    source: "ics" | "outlook-calendar",
+  ) {
+    const now = new Date().toISOString();
+    setPlan((current) => {
+      // Ensure a dedicated Meetings section exists for imported events.
+      const sections = current.sections.some((s) => s.id === "section-meetings")
+        ? current.sections
+        : [
+            ...current.sections,
+            {
+              id: "section-meetings",
+              name: "Meetings",
+              focus: "Imported calendar events.",
+              color: "#7c3aed",
+            },
+          ];
+
+      const bySourceId = new Map(
+        current.tasks
+          .filter((task) => task.sourceId)
+          .map((task) => [task.sourceId as string, task]),
+      );
+
+      // Map an event's Outlook categories to an existing app section by name
+      // (case-insensitive); fall back to the Meetings section when none match.
+      const sectionByName = new Map(sections.map((s) => [s.name.trim().toLowerCase(), s.id]));
+      function sectionForCategories(categories: string[]): string {
+        for (const category of categories) {
+          const match = sectionByName.get(category.trim().toLowerCase());
+          if (match) return match;
+        }
+        return "section-meetings";
+      }
+
+      const tasks = [...current.tasks];
+      for (const candidate of selected) {
+        const existing = bySourceId.get(candidate.uid);
+        if (existing) {
+          // Update in place; keep id, actuals, status, and the user's section.
+          const index = tasks.findIndex((task) => task.id === existing.id);
+          if (index !== -1) {
+            tasks[index] = {
+              ...tasks[index],
+              title: candidate.title,
+              days: [candidate.day],
+              estimateHours: candidate.estimateHours,
+            };
+          }
+        } else {
+          tasks.push({
+            id: createId("task"),
+            title: candidate.title,
+            sectionId: sectionForCategories(candidate.categories),
+            days: [candidate.day],
+            estimateHours: candidate.estimateHours,
+            planned: true,
+            status: "planned",
+            actualSeconds: 0,
+            timerStartedAt: null,
+            notes: "",
+            createdAt: now,
+            source,
+            sourceId: candidate.uid,
+          });
+        }
+      }
+
+      return { ...current, sections, tasks };
+    });
+    setCalendarImport(null);
   }
 
   return (
@@ -322,9 +452,7 @@ function PlannerApp({ user, signOut }: { user: NetlifyUser; signOut: () => Promi
           <div>
             <p className="eyebrow">{plan.ownerRole || "Weekly workplan"}</p>
             <h1>{plan.ownerName}</h1>
-            <p className="account-line">
-              {formatWeekLabel(plan.weekStart)} · {user.email}
-            </p>
+            <p className="account-line">{user.email}</p>
           </div>
         </div>
 
@@ -364,10 +492,20 @@ function PlannerApp({ user, signOut }: { user: NetlifyUser; signOut: () => Promi
       </header>
 
       <main>
+        <WeekSwitcher
+          activeWeekStart={activeWeekStart}
+          canPrev={canPrevWeek}
+          canNext={canNextWeek}
+          onPrev={goPrevWeek}
+          onNext={goNextWeek}
+          onJumpToDate={jumpToWeekForDate}
+          onNewWeek={() => setNewWeekOpen(true)}
+        />
+
         <section className="metrics-section" aria-label="Weekly summary">
           <button
             type="button"
-            className="metrics-toggle"
+            className={`metrics-toggle status-${planningStatus}`}
             aria-expanded={summaryOpen}
             onClick={() => setSummaryOpen((value) => !value)}
           >
@@ -376,24 +514,36 @@ function PlannerApp({ user, signOut }: { user: NetlifyUser; signOut: () => Promi
             ) : (
               <ChevronRight size={16} aria-hidden="true" />
             )}
-            Weekly summary
-            {!summaryOpen && (
-              <span className="metrics-peek">
-                {formatHours(summary.plannedEstimate)} planned ·{" "}
-                {formatHours(summary.actualHours)} tracked · {summary.completionRate}% done
-              </span>
-            )}
+            <span className="metrics-toggle-title">Weekly summary</span>
+            <span className="metrics-peek">
+              {planningLabel} · {formatHours(summary.plannedEstimate)} of{" "}
+              {formatHours(plan.weeklyCapacityHours)} planned
+            </span>
           </button>
 
           {summaryOpen && (
-            <div className="metrics-grid">
-              {metrics.map((metric) => (
-                <article className={`metric metric-${metric.tone}`} key={metric.label}>
-                  <span>{metric.label}</span>
-                  <strong>{metric.value}</strong>
-                  <p>{metric.detail}</p>
-                </article>
-              ))}
+            <div className="metrics-expanded">
+              <PlanningBanner
+                plannedEstimate={summary.plannedEstimate}
+                capacityHours={plan.weeklyCapacityHours}
+                showActions={view === "planner"}
+                onAddPlanned={() => {
+                  setTab("weekly");
+                  openCreateTask([], true);
+                }}
+                onGoWeekly={() => setTab("weekly")}
+                onStartDay={() => setTab("daily")}
+              />
+
+              <div className="metrics-grid">
+                {metrics.map((metric) => (
+                  <article className={`metric metric-${metric.tone}`} key={metric.label}>
+                    <span>{metric.label}</span>
+                    <strong>{metric.value}</strong>
+                    <p>{metric.detail}</p>
+                  </article>
+                ))}
+              </div>
             </div>
           )}
         </section>
@@ -402,26 +552,7 @@ function PlannerApp({ user, signOut }: { user: NetlifyUser; signOut: () => Promi
           <ManagerView plan={plan} now={now} />
         ) : (
           <>
-            <PlanningBanner
-              plannedEstimate={summary.plannedEstimate}
-              capacityHours={plan.weeklyCapacityHours}
-              onAddPlanned={() => {
-                setTab("weekly");
-                openCreateTask([], true);
-              }}
-              onGoWeekly={() => setTab("weekly")}
-              onStartDay={() => setTab("daily")}
-            />
-
             <nav className="tabbar" aria-label="Planner sections">
-              <button
-                className={tab === "daily" ? "active" : ""}
-                type="button"
-                onClick={() => setTab("daily")}
-              >
-                <Clock size={16} aria-hidden="true" />
-                Daily
-              </button>
               <button
                 className={tab === "weekly" ? "active" : ""}
                 type="button"
@@ -429,6 +560,14 @@ function PlannerApp({ user, signOut }: { user: NetlifyUser; signOut: () => Promi
               >
                 <ListChecks size={16} aria-hidden="true" />
                 Weekly Plan
+              </button>
+              <button
+                className={tab === "daily" ? "active" : ""}
+                type="button"
+                onClick={() => setTab("daily")}
+              >
+                <Clock size={16} aria-hidden="true" />
+                Daily
               </button>
               <button
                 className={tab === "review" ? "active" : ""}
@@ -461,6 +600,17 @@ function PlannerApp({ user, signOut }: { user: NetlifyUser; signOut: () => Promi
                 plan={plan}
                 onNewTask={() => openCreateTask([], true)}
                 onEditTask={openEditTask}
+                onImportCalendar={handleImportCalendar}
+                outlook={{
+                  available: graph.available,
+                  connected: graph.connected,
+                  busy: graph.busy,
+                  accountLabel: graph.account?.username ?? null,
+                  error: graph.error,
+                  onImport: handleImportOutlook,
+                  onDisconnect: graph.disconnect,
+                  onDismissError: graph.clearError,
+                }}
                 updateSection={updateSection}
                 addSection={addSection}
                 newSectionName={newSectionName}
@@ -495,9 +645,32 @@ function PlannerApp({ user, signOut }: { user: NetlifyUser; signOut: () => Promi
           plan={plan}
           setPlan={setPlan}
           onClose={() => setSettingsOpen(false)}
-          onStartNewWeek={() => {
-            startNewWeek();
+          onClearWeek={() => {
+            setPlan((current) => ({ ...current, tasks: [] }));
             setSettingsOpen(false);
+          }}
+        />
+      )}
+
+      {calendarImport && (
+        <ImportIcsModal
+          candidates={calendarImport.candidates}
+          existingSourceIds={plan.tasks
+            .map((task) => task.sourceId)
+            .filter((id): id is string => Boolean(id))}
+          skippedCount={calendarImport.skipped}
+          onClose={() => setCalendarImport(null)}
+          onConfirm={(selected) => confirmCalendarImport(selected, calendarImport.source)}
+        />
+      )}
+
+      {newWeekOpen && (
+        <NewWeekModal
+          weekStarts={weekStarts}
+          onClose={() => setNewWeekOpen(false)}
+          onConfirm={(weekStart, carryOver) => {
+            createOrGoToWeek(weekStart, carryOver);
+            setNewWeekOpen(false);
           }}
         />
       )}

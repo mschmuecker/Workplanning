@@ -40,9 +40,14 @@ export function TaskCard({
               {statusLabels[task.status]}
             </p>
           </div>
-          <span className={task.planned ? "pill" : "pill pill-unplanned"}>
-            {task.planned ? "Planned" : "Unplanned"}
-          </span>
+          <div className="task-pills">
+            {(task.source === "ics" || task.source === "outlook-calendar") && (
+              <span className="pill pill-source">Calendar</span>
+            )}
+            <span className={task.planned ? "pill" : "pill pill-unplanned"}>
+              {task.planned ? "Planned" : "Unplanned"}
+            </span>
+          </div>
         </div>
 
         <div className="task-stats">

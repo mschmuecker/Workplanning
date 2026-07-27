@@ -1,13 +1,28 @@
-import { Plus } from "lucide-react";
+import { CalendarSync, Plus, Upload, X } from "lucide-react";
+import { useRef } from "react";
 import { TaskCard } from "./TaskCard";
 import { EmptyState } from "./EmptyState";
 import { secondsForTask, formatHours } from "../lib/planMath";
 import type { DayKey, TaskStatus, WeekPlan, WorkSection, WorkTask } from "../types";
 
+/** Outlook (Microsoft Graph) connection state, supplied by useGraphCalendar. */
+export interface OutlookControls {
+  available: boolean; // false when VITE_MS_CLIENT_ID is unset: hide the feature
+  connected: boolean;
+  busy: boolean;
+  accountLabel: string | null;
+  error: string | null;
+  onImport: () => void;
+  onDisconnect: () => void;
+  onDismissError: () => void;
+}
+
 export function WeeklyView({
   plan,
   onNewTask,
   onEditTask,
+  onImportCalendar,
+  outlook,
   updateSection,
   addSection,
   newSectionName,
@@ -22,6 +37,8 @@ export function WeeklyView({
   plan: WeekPlan;
   onNewTask: () => void;
   onEditTask: (task: WorkTask) => void;
+  onImportCalendar: (text: string) => void;
+  outlook: OutlookControls;
   updateSection: (sectionId: string, patch: Partial<WorkSection>) => void;
   addSection: () => void;
   newSectionName: string;
@@ -33,6 +50,17 @@ export function WeeklyView({
   setPlan: (updater: (plan: WeekPlan) => WeekPlan) => void;
   now: number;
 }) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  async function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (file) {
+      const text = await file.text();
+      onImportCalendar(text);
+    }
+    // Reset so selecting the same file again still fires a change event.
+    event.target.value = "";
+  }
   function toggleDay(taskId: string, day: DayKey) {
     setPlan((current) => ({
       ...current,
@@ -59,11 +87,70 @@ export function WeeklyView({
       </div>
 
       <div className="workspace-actions">
+        {/* Outlook is optional: with no client id configured the button is
+            absent entirely and .ics import remains the calendar path. */}
+        {outlook.available && (
+          <>
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={outlook.onImport}
+              disabled={outlook.busy}
+              title={outlook.accountLabel ? `Connected as ${outlook.accountLabel}` : undefined}
+            >
+              <CalendarSync size={16} aria-hidden="true" />
+              {outlook.busy
+                ? "Reading Outlook..."
+                : outlook.connected
+                  ? "Import from Outlook"
+                  : "Connect Outlook"}
+            </button>
+            {outlook.connected && !outlook.busy && (
+              <button
+                type="button"
+                className="icon-button"
+                title={`Disconnect ${outlook.accountLabel ?? "Outlook"}`}
+                onClick={outlook.onDisconnect}
+              >
+                <X size={16} aria-hidden="true" />
+              </button>
+            )}
+          </>
+        )}
+        <button
+          type="button"
+          className="secondary-button"
+          onClick={() => fileInputRef.current?.click()}
+        >
+          <Upload size={16} aria-hidden="true" />
+          Import .ics
+        </button>
         <button type="button" className="primary-button" onClick={onNewTask}>
           <Plus size={16} aria-hidden="true" />
           Add task
         </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".ics,text/calendar"
+          onChange={handleFileChange}
+          hidden
+        />
       </div>
+
+      {outlook.error && (
+        <p className="outlook-error" role="alert">
+          <span>{outlook.error}</span>
+          <button
+            type="button"
+            className="icon-button"
+            title="Dismiss"
+            onClick={outlook.onDismissError}
+          >
+            <X size={14} aria-hidden="true" />
+          </button>
+        </p>
+      )}
 
       <div className="section-editor">
         {plan.sections.map((section) => (

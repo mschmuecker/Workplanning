@@ -1,5 +1,8 @@
-AI USAGE STATEMENT — Personal Workplanner
+AI USAGE STATEMENT — Personal Workplanner - Matt Schmuecker
 ==========================================
+
+I figured it was helpful to just have the AI model explain the extent of how it operated but I generally took the approach that the below outlines of allowing the AI tool to serve as the programmer. I outlined using typescript and modularizing the components (it originally put them into one large tsx file). This actually allows me to understand and review the code in a way that I would expect. I also want typescript to have better typing/object completion/etc since it sets up a better future for adding to the tool/debugging/understanding, etc. The AI had a lot of troubles with getting proportions and balancing of the UI to be effective and initially made some silly choices in its user inputs it expected so I refined those and cut out a lot of necessary, tangential features and streamline it more towards a somewhat simple workplanning tool. AI added a lot of value in hooking up the Netlify Identity auth workflow and persisting that through the application.
+
 
 Summary
 -------
@@ -85,3 +88,56 @@ Every AI change was verified by a successful production build, and the human
 independently reviewed and tested behavior in the browser / on the deployed
 site before it was accepted. Correctness and final judgment remained with the
 human developer.
+
+
+How data storage works (Netlify Blobs)
+--------------------------------------
+The app stores each user's data with Netlify Blobs, a simple key/value object
+store that Netlify provisions automatically for a site — there is no database
+to set up, no connection string, and no separate credentials to manage.
+
+Where the code lives:
+ - Server: netlify/functions/workplan.ts (a Netlify serverless Function).
+ - Client: src/storage.ts (talks to the Function over HTTP).
+
+The serverless Function (the only thing that touches Blobs):
+ - It runs on Netlify's servers, not in the browser, so the Blobs access
+   happens server-side where it is trusted.
+ - It opens a named store with `getStore({ name: "workplan", consistency:
+   "strong" })`. "workplan" is just the bucket name; "strong" consistency means
+   a value written is immediately readable back (no propagation lag), which
+   keeps saves and reloads in sync.
+ - Netlify injects the Blobs credentials into the Function's runtime
+   automatically, so no API keys appear anywhere in the code or the repo.
+
+Per-user isolation (how one user can't see another's data):
+ - The Function first identifies the signed-in user from their Netlify Identity
+   session, then reads/writes a key namespaced to that user's id:
+   `plan:<user.id>`. Because every user gets a distinct key, each account's
+   workplan is stored and retrieved separately. If there is no valid session,
+   the Function returns HTTP 401 and touches no data.
+
+What is stored:
+ - A single JSON value per user: the entire "workspace" object (all weeks,
+   their tasks/sections, the active week, etc.). Reads use
+   `store.get(key, { type: "json" })`; writes use `store.setJSON(key, value)`.
+
+Request flow (client <-> Function <-> Blobs):
+ - Load: on sign-in the browser GETs /.netlify/functions/workplan (sending the
+   Identity cookie). The Function returns that user's stored JSON (or null for
+   a brand-new user).
+ - Save: on edits the browser POSTs the JSON back (debounced ~700ms so rapid
+   edits collapse into one write). The Function validates it and calls setJSON.
+ - A sync badge in the UI reflects this round-trip (Synced / Saving / Local
+   only / Sync blocked).
+
+Local fallback:
+ - The browser also mirrors the data to localStorage. If the backend is
+   unreachable (or during local dev without the Function), the app keeps
+   working from the local copy; when the Function is reachable and the user is
+   authenticated, the Blobs copy is authoritative and syncs across devices.
+
+Why this approach:
+ - It gives authenticated, per-user, cross-device persistence with essentially
+   zero backend/database setup and no secrets in the codebase — Netlify manages
+   the store's provisioning and access for us.
